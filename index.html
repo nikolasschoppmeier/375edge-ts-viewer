@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>375edge — Times Square 3D Camera View Cones</title>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  #cesiumContainer { width: 100vw; height: 100vh; }
+
+  /* ── LEFT PANEL: camera controls ── */
+  #panel {
+    position: fixed; top: 12px; left: 12px; background: rgba(10,10,10,.94);
+    backdrop-filter: blur(10px); border: 1px solid #333; border-radius: 10px;
+    padding: 14px 16px; z-index: 100; width: 310px; color: #fff;
+    max-height: calc(100vh - 24px); overflow-y: auto;
+  }
+  #panel::-webkit-scrollbar { width: 4px; }
+  #panel::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+  #panel h2 { font-size: 14px; color: #FF3D14; margin-bottom: 2px; }
+  #panel .sub { font-size: 10px; color: #888; margin-bottom: 10px; }
+
+  .node-section { margin-bottom: 10px; }
+  .node-header {
+    display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600;
+    padding: 6px 8px; border-radius: 6px; cursor: pointer; user-select: none;
+  }
+  .node-header:hover { background: rgba(255,255,255,.06); }
+  .node-header .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .node-header .chevron { font-size: 10px; margin-left: auto; color: #666; transition: transform .2s; }
+  .node-header.open .chevron { transform: rotate(90deg); }
+
+  .cam-list { padding: 2px 0 4px 18px; display: none; }
+  .cam-list.open { display: block; }
+
+  .cam-row {
+    display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: center;
+    font-size: 10px; color: #bbb; padding: 3px 4px; border-radius: 4px;
+  }
+  .cam-row:hover { background: rgba(255,255,255,.04); }
+  .cam-toggle { width: 14px; height: 14px; accent-color: #FF3D14; cursor: pointer; }
+
+  .cam-edit {
+    display: none; padding: 8px 10px; margin: 2px 0 6px 0;
+    background: rgba(255,255,255,.04); border-radius: 6px; border: 1px solid rgba(255,255,255,.06);
+  }
+  .cam-edit.open { display: block; }
+  .cam-edit .slider-row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+  .cam-edit .slider-label { font-size: 10px; color: #999; min-width: 32px; }
+  .cam-edit input[type="range"] { flex: 1; accent-color: #FF3D14; height: 14px; }
+  .cam-edit .slider-val { font-size: 10px; color: #FF3D14; min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+  .cam-edit .lens-row { display: flex; gap: 4px; margin-top: 4px; }
+  .cam-edit .lens-btn {
+    font-size: 9px; padding: 2px 8px; border-radius: 3px; cursor: pointer;
+    border: 1px solid #444; background: transparent; color: #999;
+  }
+  .cam-edit .lens-btn.active { border-color: #FF3D14; color: #FF3D14; background: rgba(255,61,20,.1); }
+  .cam-edit .lens-btn:hover { border-color: #FF3D14; }
+
+  .global-ctrls { border-top: 1px solid #333; padding-top: 8px; margin-top: 6px; }
+  .ctrl { margin-bottom: 6px; }
+  .ctrl label { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #ccc; cursor: pointer; }
+  .ctrl input[type="range"] { width: 110px; accent-color: #FF3D14; }
+  .ctrl .val { font-size: 10px; color: #FF3D14; min-width: 30px; text-align: right; }
+
+  .add-cam-btn {
+    font-size: 10px; color: #888; cursor: pointer; padding: 3px 8px;
+    border: 1px dashed #444; border-radius: 4px; margin-top: 4px; text-align: center;
+  }
+  .add-cam-btn:hover { color: #FF3D14; border-color: #FF3D14; }
+  .remove-cam { font-size: 10px; color: #666; cursor: pointer; margin-left: 4px; }
+  .remove-cam:hover { color: #ff4444; }
+
+  /* ── RIGHT PANEL: fly-to + viewer controls ── */
+  #rightPanel {
+    position: fixed; top: 12px; right: 12px; z-index: 100;
+    display: flex; flex-direction: column; gap: 8px; width: 220px;
+  }
+
+  #flyto { display: flex; flex-wrap: wrap; gap: 5px; }
+  #flyto button {
+    background: rgba(10,10,10,.92); color: #fff; border: 1px solid #444;
+    border-radius: 6px; padding: 6px 10px; font-size: 10px; cursor: pointer; flex: 1; min-width: 90px;
+  }
+  #flyto button:hover { border-color: #FF3D14; color: #FF3D14; }
+
+  #viewerPanel {
+    background: rgba(10,10,10,.94); backdrop-filter: blur(10px);
+    border: 1px solid #333; border-radius: 10px; padding: 12px 14px; color: #fff;
+  }
+  #viewerPanel h3 { font-size: 12px; color: #FF3D14; margin-bottom: 6px; }
+  #viewerPanel .vp-section { margin-bottom: 8px; }
+  #viewerPanel .vp-label { font-size: 9px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
+
+  .vp-slider-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .vp-slider-row .vp-sl { font-size: 10px; color: #999; min-width: 42px; }
+  .vp-slider-row input[type="range"] { flex: 1; accent-color: #FF3D14; height: 12px; }
+  .vp-slider-row .vp-sv { font-size: 10px; color: #FF3D14; min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  #posReadout { font-size: 10px; color: #aaa; font-variant-numeric: tabular-nums; line-height: 1.6; }
+  #posReadout span { color: #FF3D14; }
+
+  .mode-btns { display: flex; gap: 4px; margin-bottom: 6px; }
+  .mode-btn {
+    flex: 1; font-size: 10px; padding: 5px 0; border-radius: 4px; cursor: pointer;
+    border: 1px solid #444; background: transparent; color: #999; text-align: center;
+  }
+  .mode-btn.active { border-color: #FF3D14; color: #FF3D14; background: rgba(255,61,20,.1); }
+  .mode-btn:hover { border-color: #FF3D14; }
+
+  .keys-hint {
+    font-size: 9px; color: #555; line-height: 1.5; padding-top: 4px; border-top: 1px solid #222;
+  }
+  .keys-hint kbd {
+    display: inline-block; background: #222; border: 1px solid #444; border-radius: 3px;
+    padding: 0 4px; font-size: 9px; color: #ccc; font-family: inherit; min-width: 16px; text-align: center;
+  }
+</style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+
+<!-- LEFT PANEL: camera controls -->
+<div id="panel">
+  <h2>375edge 3D View Cones</h2>
+  <div class="sub">Times Square — Pan / Tilt / FOV per camera</div>
+  <div id="nodeControls"></div>
+  <div class="global-ctrls">
+    <div class="ctrl">
+      <label>Global opacity:
+        <input type="range" min="5" max="60" value="25" oninput="setGlobalOpacity(this.value)">
+        <span class="val" id="opVal">25%</span>
+      </label>
+    </div>
+    <div class="ctrl">
+      <label>Global range (m):
+        <input type="range" min="10" max="120" value="50" oninput="setGlobalRange(this.value)">
+        <span class="val" id="grVal">50m</span>
+      </label>
+    </div>
+  </div>
+</div>
+
+<!-- RIGHT PANEL: viewer controls -->
+<div id="rightPanel">
+
+  <div id="flyto">
+    <button onclick="flyToOverview()">Overview</button>
+    <button onclick="flyToNode('node1')">2TS</button>
+    <button onclick="flyToNode('node2')">Duffy</button>
+    <button onclick="flyToStreetLevel()">Street</button>
+  </div>
+
+  <div id="viewerPanel">
+    <h3>Viewer Controls</h3>
+
+    <div class="vp-section">
+      <div class="vp-label">Navigation Mode</div>
+      <div class="mode-btns">
+        <div class="mode-btn active" id="modeOrbit" onclick="setNavMode('orbit')">Orbit</div>
+        <div class="mode-btn" id="modeWalk" onclick="setNavMode('walk')">Walk</div>
+        <div class="mode-btn" id="modeFly" onclick="setNavMode('fly')">Fly</div>
+      </div>
+    </div>
+
+    <div class="vp-section">
+      <div class="vp-label">Move Speed</div>
+      <div class="vp-slider-row">
+        <span class="vp-sl">Slow</span>
+        <input type="range" min="1" max="100" value="20" id="speedSlider" oninput="setMoveSpeed(+this.value)">
+        <span class="vp-sv" id="speedVal">20</span>
+      </div>
+    </div>
+
+    <div class="vp-section">
+      <div class="vp-label">Viewer Heading</div>
+      <div class="vp-slider-row">
+        <span class="vp-sl">0°</span>
+        <input type="range" min="0" max="359" value="17" id="vHeadingSlider" oninput="setViewerHeading(+this.value)">
+        <span class="vp-sv" id="vHeadingVal">17°</span>
+      </div>
+    </div>
+
+    <div class="vp-section">
+      <div class="vp-label">Viewer Pitch</div>
+      <div class="vp-slider-row">
+        <span class="vp-sl">-90°</span>
+        <input type="range" min="-90" max="10" value="-47" id="vPitchSlider" oninput="setViewerPitch(+this.value)">
+        <span class="vp-sv" id="vPitchVal">-47°</span>
+      </div>
+    </div>
+
+    <div class="vp-section">
+      <div class="vp-label">Altitude (m)</div>
+      <div class="vp-slider-row">
+        <span class="vp-sl">1m</span>
+        <input type="range" min="1" max="500" value="134" id="vAltSlider" oninput="setViewerAlt(+this.value)">
+        <span class="vp-sv" id="vAltVal">134m</span>
+      </div>
+    </div>
+
+    <div class="vp-section">
+      <div class="vp-label">Position</div>
+      <div id="posReadout">
+        Lat: <span id="prLat">—</span><br>
+        Lng: <span id="prLng">—</span><br>
+        Alt: <span id="prAlt">—</span> m<br>
+        Heading: <span id="prHead">—</span>° &nbsp; Pitch: <span id="prPitch">—</span>°
+      </div>
+    </div>
+
+    <div class="keys-hint">
+      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;
+      <kbd>Q</kbd> down <kbd>E</kbd> up<br>
+      <kbd>←</kbd><kbd>→</kbd> turn &nbsp;
+      <kbd>↑</kbd><kbd>↓</kbd> pitch<br>
+      <kbd>Shift</kbd> = 5× speed &nbsp;
+      <kbd>R</kbd> reset heading
+    </div>
+  </div>
+</div>
+
+<script>
+// ── CONFIG ──
+Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIxZjRiODMxNi1jMTZjLTQ0NDItODEzMy1lMDQxNDk3MzczNWUiLCJpZCI6NDAwODE0LCJpYXQiOjE3NzMwNjYyODJ9.ZMPP3xi7u0ZLLG4XpwIAgB8Pb-CDG3SF0YiLGU3ZFMw';
+
+const LOCATIONS = {
+  node1: { lat: 40.75952146712122, lng: -73.98475688420282, height: 6.7, name: "Node 1: 2 Times Square", screenFacing: "south", color: "#FF3D14" },
+  node2: { lat: 40.759163704091534, lng: -73.98536274455128, height: 5.5, name: "Node 2: Duffy Duo", screenFacing: "east", color: "#FFD700" },
+};
+
+const LENS_PRESETS = {
+  "2.8mm": { fov: 108 }, "4mm": { fov: 87 }, "6mm": { fov: 54 }, "8mm": { fov: 40 }, "12mm": { fov: 27 },
+};
+
+const CAMERAS = {
+  node1: [
+    { id: "n1c1", lens: "4mm", pan: 225, tilt: 25, fov: 87, range: 50, label: "C1 SW Broadway", color: "#FF3D14", visible: true },
+    { id: "n1c2", lens: "4mm", pan: 195, tilt: 25, fov: 87, range: 50, label: "C2 S Bowtie", color: "#FF3D14", visible: true },
+    { id: "n1c3", lens: "4mm", pan: 150, tilt: 25, fov: 87, range: 50, label: "C3 SE 7th Ave", color: "#FF3D14", visible: true },
+    { id: "n1c4", lens: "6mm", pan: 210, tilt: 20, fov: 54, range: 50, label: "C4 SSW Duffy", color: "#FF6633", visible: true },
+    { id: "n1c5", lens: "6mm", pan: 185, tilt: 20, fov: 54, range: 50, label: "C5 S Red Steps", color: "#FF6633", visible: true },
+    { id: "n1c6", lens: "8mm", pan: 155, tilt: 15, fov: 40, range: 50, label: "C6 SSE Deep 7th", color: "#FF9944", visible: true },
+  ],
+  node2: [
+    { id: "n2c1", lens: "4mm", pan: 5,   tilt: 25, fov: 87, range: 50, label: "C1 N toward 2TS", color: "#FFD700", visible: true },
+    { id: "n2c2", lens: "4mm", pan: 100, tilt: 25, fov: 87, range: 50, label: "C2 E 7th Ave", color: "#FFD700", visible: true },
+    { id: "n2c3", lens: "4mm", pan: 185, tilt: 25, fov: 87, range: 50, label: "C3 S toward 46th", color: "#FFD700", visible: true },
+    { id: "n2c4", lens: "4mm", pan: 275, tilt: 25, fov: 87, range: 50, label: "C4 W Broadway", color: "#FFD700", visible: true },
+    { id: "n2c5", lens: "6mm", pan: 35,  tilt: 20, fov: 54, range: 50, label: "C5 NE 2TS Screens", color: "#FFAA00", visible: true },
+    { id: "n2c6", lens: "6mm", pan: 335, tilt: 20, fov: 54, range: 50, label: "C6 NW Upper Bway", color: "#FFAA00", visible: true },
+  ],
+};
+
+let viewer;
+let coneEntities = {};
+let globalOpacity = 0.25;
+let globalRange = 50;
+
+// ── VIEWER NAVIGATION STATE ──
+let navMode = 'orbit'; // 'orbit' | 'walk' | 'fly'
+let moveSpeed = 20;    // m/s base
+let keysDown = {};
+let walkHeight = 1.7;  // eye height in walk mode
+
+// ── INIT ──
+async function init() {
+  viewer = new Cesium.Viewer('cesiumContainer', {
+    terrain: Cesium.Terrain.fromWorldTerrain(),
+    timeline: false, animation: false, homeButton: false, geocoder: false,
+    sceneModePicker: false, baseLayerPicker: false, navigationHelpButton: false,
+    infoBox: true, selectionIndicator: true, shadows: false,
+  });
+
+  viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#111111');
+
+  try {
+    const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(2275207);
+    viewer.scene.primitives.add(tileset);
+  } catch (e) {
+    console.warn('Could not load Google 3D Tiles:', e);
+  }
+
+  flyToOverview();
+  buildNodeMarkers();
+  buildAllCones();
+  renderControls();
+  setupKeyboardNav();
+  startPositionReadout();
+}
+
+// ══════════════════════════════════════════
+// VIEWER NAVIGATION
+// ══════════════════════════════════════════
+
+function setupKeyboardNav() {
+  const NAV_KEYS = ['w','a','s','d','q','e','arrowup','arrowdown','arrowleft','arrowright','r'];
+
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    const key = e.key.toLowerCase();
+    keysDown[key] = true;
+    keysDown['shift'] = e.shiftKey;
+    // Prevent arrow keys from scrolling page / fighting Cesium defaults
+    if (key.startsWith('arrow')) e.preventDefault();
+    if (key === 'r') resetHeading();
+  });
+  document.addEventListener('keyup', (e) => {
+    keysDown[e.key.toLowerCase()] = false;
+    keysDown['shift'] = e.shiftKey;
+  });
+  // Lose all keys on blur (tab away)
+  window.addEventListener('blur', () => { keysDown = {}; });
+
+  viewer.clock.onTick.addEventListener(onTick);
+}
+
+let lastTickTime = 0;
+function onTick() {
+  const now = performance.now();
+  const dt = lastTickTime ? Math.min((now - lastTickTime) / 1000, 0.1) : 0.016; // cap at 100ms
+  lastTickTime = now;
+
+  const cam = viewer.camera;
+  const speedMult = keysDown['shift'] ? 5 : 1;
+  const speed = moveSpeed * speedMult * dt;
+
+  // Turn rate: use setView for heading/pitch to avoid Cesium's orbit-relative rotation
+  const turnDeg = 60 * dt * speedMult; // 60°/s base, shift = 300°/s
+  const pitchDeg = 30 * dt * speedMult; // 30°/s base
+
+  const anyKey = ['w','a','s','d','q','e','arrowleft','arrowright','arrowup','arrowdown']
+    .some(k => keysDown[k]);
+  if (!anyKey) return;
+
+  const carto = cam.positionCartographic;
+  let lng = Cesium.Math.toDegrees(carto.longitude);
+  let lat = Cesium.Math.toDegrees(carto.latitude);
+  let alt = carto.height;
+  let heading = Cesium.Math.toDegrees(cam.heading);
+  let pitch = Cesium.Math.toDegrees(cam.pitch);
+
+  // ── Arrow keys: adjust heading & pitch directly ──
+  if (keysDown['arrowleft'])  heading -= turnDeg;
+  if (keysDown['arrowright']) heading += turnDeg;
+  if (keysDown['arrowup'])    pitch = Math.min(pitch + pitchDeg, 10);   // cap at +10°
+  if (keysDown['arrowdown'])  pitch = Math.max(pitch - pitchDeg, -90);  // cap at -90°
+  heading = ((heading % 360) + 360) % 360;
+
+  if (navMode === 'orbit') {
+    // WASD: translate position in local horizontal plane
+    const hRad = Cesium.Math.toRadians(heading);
+    const cosLat = Math.cos(Cesium.Math.toRadians(lat));
+    const mPerDegLat = 111320;
+    const mPerDegLng = 111320 * cosLat;
+    if (keysDown['w']) { lat += (Math.cos(hRad) * speed) / mPerDegLat; lng += (Math.sin(hRad) * speed) / mPerDegLng; }
+    if (keysDown['s']) { lat -= (Math.cos(hRad) * speed) / mPerDegLat; lng -= (Math.sin(hRad) * speed) / mPerDegLng; }
+    if (keysDown['a']) { lat += (Math.cos(hRad - Math.PI/2) * speed) / mPerDegLat; lng += (Math.sin(hRad - Math.PI/2) * speed) / mPerDegLng; }
+    if (keysDown['d']) { lat += (Math.cos(hRad + Math.PI/2) * speed) / mPerDegLat; lng += (Math.sin(hRad + Math.PI/2) * speed) / mPerDegLng; }
+    if (keysDown['e']) alt += speed;
+    if (keysDown['q']) alt = Math.max(alt - speed, 1);
+
+  } else if (navMode === 'fly') {
+    // Move along look direction (including pitch)
+    const hRad = Cesium.Math.toRadians(heading);
+    const pRad = Cesium.Math.toRadians(pitch);
+    const cosP = Math.cos(pRad);
+    const cosLat = Math.cos(Cesium.Math.toRadians(lat));
+    const mPerDegLat = 111320;
+    const mPerDegLng = 111320 * cosLat;
+    // Forward/back along heading + pitch
+    if (keysDown['w']) {
+      lat += (Math.cos(hRad) * cosP * speed) / mPerDegLat;
+      lng += (Math.sin(hRad) * cosP * speed) / mPerDegLng;
+      alt += Math.sin(pRad) * speed;
+    }
+    if (keysDown['s']) {
+      lat -= (Math.cos(hRad) * cosP * speed) / mPerDegLat;
+      lng -= (Math.sin(hRad) * cosP * speed) / mPerDegLng;
+      alt -= Math.sin(pRad) * speed;
+    }
+    // Strafe horizontal
+    if (keysDown['a']) { lat += (Math.cos(hRad - Math.PI/2) * speed) / mPerDegLat; lng += (Math.sin(hRad - Math.PI/2) * speed) / mPerDegLng; }
+    if (keysDown['d']) { lat += (Math.cos(hRad + Math.PI/2) * speed) / mPerDegLat; lng += (Math.sin(hRad + Math.PI/2) * speed) / mPerDegLng; }
+    if (keysDown['e']) alt += speed;
+    if (keysDown['q']) alt = Math.max(alt - speed, 1);
+
+  } else if (navMode === 'walk') {
+    const hRad = Cesium.Math.toRadians(heading);
+    const cosLat = Math.cos(Cesium.Math.toRadians(lat));
+    const mPerDegLat = 111320;
+    const mPerDegLng = 111320 * cosLat;
+    // Horizontal movement only
+    if (keysDown['w']) { lat += (Math.cos(hRad) * speed) / mPerDegLat; lng += (Math.sin(hRad) * speed) / mPerDegLng; }
+    if (keysDown['s']) { lat -= (Math.cos(hRad) * speed) / mPerDegLat; lng -= (Math.sin(hRad) * speed) / mPerDegLng; }
+    if (keysDown['a']) { lat += (Math.cos(hRad - Math.PI/2) * speed) / mPerDegLat; lng += (Math.sin(hRad - Math.PI/2) * speed) / mPerDegLng; }
+    if (keysDown['d']) { lat += (Math.cos(hRad + Math.PI/2) * speed) / mPerDegLat; lng += (Math.sin(hRad + Math.PI/2) * speed) / mPerDegLng; }
+    // Lock to terrain
+    const terrainH = viewer.scene.globe.getHeight(Cesium.Cartographic.fromDegrees(lng, lat)) || 0;
+    alt = terrainH + walkHeight;
+  }
+
+  // ── Apply position + orientation via setView (safe, no orbit-relative weirdness) ──
+  cam.setView({
+    destination: Cesium.Cartesian3.fromDegrees(lng, lat, Math.max(alt, 0.5)),
+    orientation: { heading: Cesium.Math.toRadians(heading), pitch: Cesium.Math.toRadians(pitch), roll: 0 },
+  });
+
+  updateSliders();
+}
+
+function setNavMode(mode) {
+  navMode = mode;
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('mode' + mode.charAt(0).toUpperCase() + mode.slice(1)).classList.add('active');
+
+  if (mode === 'walk') {
+    // Drop to street level
+    const carto = viewer.camera.positionCartographic;
+    const terrainH = viewer.scene.globe.getHeight(carto) || 0;
+    viewer.camera.setView({
+      destination: Cesium.Cartesian3.fromDegrees(
+        Cesium.Math.toDegrees(carto.longitude),
+        Cesium.Math.toDegrees(carto.latitude),
+        terrainH + walkHeight
+      ),
+      orientation: { heading: viewer.camera.heading, pitch: Cesium.Math.toRadians(-5), roll: 0 },
+    });
+    // Disable default mouse tilt in walk mode to prevent going underground
+    viewer.scene.screenSpaceCameraController.enableTilt = false;
+    viewer.scene.screenSpaceCameraController.enableZoom = false;
+  } else {
+    viewer.scene.screenSpaceCameraController.enableTilt = true;
+    viewer.scene.screenSpaceCameraController.enableZoom = true;
+  }
+}
+
+function setMoveSpeed(val) {
+  moveSpeed = val;
+  document.getElementById('speedVal').textContent = val;
+}
+
+function setViewerHeading(deg) {
+  document.getElementById('vHeadingVal').textContent = deg + '°';
+  const carto = viewer.camera.positionCartographic;
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, carto.height),
+    orientation: { heading: Cesium.Math.toRadians(deg), pitch: viewer.camera.pitch, roll: 0 },
+  });
+}
+
+function setViewerPitch(deg) {
+  document.getElementById('vPitchVal').textContent = deg + '°';
+  const carto = viewer.camera.positionCartographic;
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, carto.height),
+    orientation: { heading: viewer.camera.heading, pitch: Cesium.Math.toRadians(deg), roll: 0 },
+  });
+}
+
+function setViewerAlt(m) {
+  document.getElementById('vAltVal').textContent = m + 'm';
+  const carto = viewer.camera.positionCartographic;
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(
+      Cesium.Math.toDegrees(carto.longitude),
+      Cesium.Math.toDegrees(carto.latitude),
+      m
+    ),
+    orientation: { heading: viewer.camera.heading, pitch: viewer.camera.pitch, roll: 0 },
+  });
+}
+
+function resetHeading() {
+  const carto = viewer.camera.positionCartographic;
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, carto.height),
+    orientation: { heading: Cesium.Math.toRadians(0), pitch: viewer.camera.pitch, roll: 0 },
+  });
+}
+
+function updateSliders() {
+  // Sync sliders to current camera state (called when using keyboard nav)
+  const h = Math.round(Cesium.Math.toDegrees(viewer.camera.heading)) % 360;
+  const p = Math.round(Cesium.Math.toDegrees(viewer.camera.pitch));
+  const carto = viewer.camera.positionCartographic;
+  const alt = Math.round(carto.height);
+
+  const hs = document.getElementById('vHeadingSlider');
+  const ps = document.getElementById('vPitchSlider');
+  const as = document.getElementById('vAltSlider');
+  if (hs && !hs.matches(':active')) { hs.value = h; document.getElementById('vHeadingVal').textContent = h + '°'; }
+  if (ps && !ps.matches(':active')) { ps.value = Math.max(-90, Math.min(10, p)); document.getElementById('vPitchVal').textContent = p + '°'; }
+  if (as && !as.matches(':active')) { as.value = Math.max(1, Math.min(500, alt)); document.getElementById('vAltVal').textContent = alt + 'm'; }
+}
+
+function startPositionReadout() {
+  setInterval(() => {
+    const carto = viewer.camera.positionCartographic;
+    if (!carto) return;
+    document.getElementById('prLat').textContent = Cesium.Math.toDegrees(carto.latitude).toFixed(6);
+    document.getElementById('prLng').textContent = Cesium.Math.toDegrees(carto.longitude).toFixed(6);
+    document.getElementById('prAlt').textContent = carto.height.toFixed(1);
+    document.getElementById('prHead').textContent = (Cesium.Math.toDegrees(viewer.camera.heading) % 360).toFixed(1);
+    document.getElementById('prPitch').textContent = Cesium.Math.toDegrees(viewer.camera.pitch).toFixed(1);
+  }, 200);
+}
+
+// ══════════════════════════════════════════
+// NODE MARKERS & SCREEN INDICATORS
+// ══════════════════════════════════════════
+
+function buildNodeMarkers() {
+  for (const [nodeId, loc] of Object.entries(LOCATIONS)) {
+    viewer.entities.add({
+      name: loc.name,
+      position: Cesium.Cartesian3.fromDegrees(loc.lng, loc.lat, loc.height),
+      point: {
+        pixelSize: 14, color: Cesium.Color.fromCssColorString(loc.color),
+        outlineColor: Cesium.Color.WHITE, outlineWidth: 3,
+        heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      label: {
+        text: loc.name, font: 'bold 13px sans-serif',
+        fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -20),
+        heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    viewer.entities.add({
+      polyline: {
+        positions: Cesium.Cartesian3.fromDegreesArrayHeights([loc.lng, loc.lat, 0, loc.lng, loc.lat, loc.height]),
+        width: 3, material: Cesium.Color.fromCssColorString(loc.color).withAlpha(0.6),
+      }
+    });
+    addScreenIndicator(loc);
+  }
+}
+
+function addScreenIndicator(loc) {
+  const azimuth = loc.screenFacing === 'south' ? 180 : loc.screenFacing === 'east' ? 90 : 0;
+  const azRad = azimuth * Math.PI / 180;
+  const perpRad = (azimuth + 90) * Math.PI / 180;
+  const width = 20;
+  const cosLat = Math.cos(loc.lat * Math.PI / 180);
+  const pDLat = (width/2 * Math.cos(perpRad)) / 111320;
+  const pDLng = (width/2 * Math.sin(perpRad)) / (111320 * cosLat);
+
+  viewer.entities.add({
+    wall: {
+      positions: Cesium.Cartesian3.fromDegreesArrayHeights([
+        loc.lng - pDLng, loc.lat - pDLat, loc.height + 5,
+        loc.lng + pDLng, loc.lat + pDLat, loc.height + 5,
+      ]),
+      minimumHeights: [loc.height - 3, loc.height - 3],
+      material: Cesium.Color.fromCssColorString(loc.color).withAlpha(0.7),
+    }
+  });
+  const range = 15;
+  viewer.entities.add({
+    polyline: {
+      positions: Cesium.Cartesian3.fromDegreesArrayHeights([
+        loc.lng, loc.lat, loc.height,
+        loc.lng + (range * Math.sin(azRad)) / (111320 * cosLat),
+        loc.lat + (range * Math.cos(azRad)) / 111320,
+        loc.height - 2
+      ]),
+      width: 4, material: Cesium.Color.fromCssColorString(loc.color).withAlpha(0.8),
+    }
+  });
+}
+
+// ══════════════════════════════════════════
+// CONE GEOMETRY WITH TILT
+// ══════════════════════════════════════════
+
+function computeConeGeometry(h, tiltDeg, hfovDeg, maxRange) {
+  const hfovRad = hfovDeg * Math.PI / 180;
+  const vfovRad = 2 * Math.atan(Math.tan(hfovRad / 2) * 9 / 16);
+  const tiltRad = tiltDeg * Math.PI / 180;
+  const upperAngle = tiltRad - vfovRad / 2;
+  const lowerAngle = tiltRad + vfovRad / 2;
+
+  let farDist = upperAngle <= 0.01 ? maxRange : Math.min(h / Math.tan(upperAngle), maxRange);
+  let nearDist = lowerAngle >= Math.PI / 2 ? 0 : Math.max(h / Math.tan(lowerAngle), 0.5);
+
+  const farHeight = Math.max(h - farDist * Math.tan(upperAngle), 0);
+  const nearHeight = Math.max(h - nearDist * Math.tan(lowerAngle), 0);
+
+  return { nearDist, farDist, nearHeight, farHeight };
+}
+
+function buildCone(nodeId, cam) {
+  removeCone(cam.id);
+  if (!cam.visible) return;
+
+  const loc = LOCATIONS[nodeId];
+  const entities = [];
+  const maxRange = cam.range || globalRange;
+  const steps = 20;
+  const startAz = cam.pan - cam.fov / 2;
+  const endAz = cam.pan + cam.fov / 2;
+  const cosLat = Math.cos(loc.lat * Math.PI / 180);
+  const opacity = globalOpacity;
+  const coneColor = Cesium.Color.fromCssColorString(cam.color);
+  const h = loc.height;
+  const geo = computeConeGeometry(h, cam.tilt, cam.fov, maxRange);
+
+  function offset(az, dist) {
+    const azRad = az * Math.PI / 180;
+    return { lng: loc.lng + (dist * Math.sin(azRad)) / (111320 * cosLat), lat: loc.lat + (dist * Math.cos(azRad)) / 111320 };
+  }
+
+  // Ground footprint
+  const groundPts = [];
+  for (let i = 0; i <= steps; i++) {
+    const p = offset(startAz + (endAz - startAz) * (i / steps), geo.nearDist);
+    groundPts.push(p.lng, p.lat);
+  }
+  for (let i = steps; i >= 0; i--) {
+    const p = offset(startAz + (endAz - startAz) * (i / steps), geo.farDist);
+    groundPts.push(p.lng, p.lat);
+  }
+
+  entities.push(viewer.entities.add({
+    name: `${loc.name} — ${cam.label}`,
+    polygon: {
+      hierarchy: Cesium.Cartesian3.fromDegreesArray(groundPts),
+      material: coneColor.withAlpha(opacity * 0.6),
+      heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+    },
+    description: `<div style="font-family:sans-serif"><h3 style="color:${cam.color}">${cam.label}</h3>
+      <table style="font-size:12px"><tr><td><b>Lens</b></td><td>${cam.lens}</td></tr>
+      <tr><td><b>Pan</b></td><td>${cam.pan}°</td></tr><tr><td><b>Tilt</b></td><td>${cam.tilt}°</td></tr>
+      <tr><td><b>H-FOV</b></td><td>${cam.fov}°</td></tr><tr><td><b>Near</b></td><td>${geo.nearDist.toFixed(1)}m</td></tr>
+      <tr><td><b>Far</b></td><td>${geo.farDist.toFixed(1)}m</td></tr></table></div>`
+  }));
+
+  // 3D surface — camera to far arc
+  for (let i = 0; i < steps; i++) {
+    const p1 = offset(startAz + (endAz - startAz) * (i / steps), geo.farDist);
+    const p2 = offset(startAz + (endAz - startAz) * ((i+1) / steps), geo.farDist);
+    entities.push(viewer.entities.add({
+      polygon: {
+        hierarchy: Cesium.Cartesian3.fromDegreesArrayHeights([loc.lng, loc.lat, h, p1.lng, p1.lat, geo.farHeight, p2.lng, p2.lat, geo.farHeight]),
+        perPositionHeight: true, material: coneColor.withAlpha(opacity * 0.4), outline: false,
+      }
+    }));
+  }
+
+  // Camera to near arc
+  if (geo.nearDist > 1) {
+    for (let i = 0; i < steps; i++) {
+      const p1 = offset(startAz + (endAz - startAz) * (i / steps), geo.nearDist);
+      const p2 = offset(startAz + (endAz - startAz) * ((i+1) / steps), geo.nearDist);
+      entities.push(viewer.entities.add({
+        polygon: {
+          hierarchy: Cesium.Cartesian3.fromDegreesArrayHeights([loc.lng, loc.lat, h, p1.lng, p1.lat, geo.nearHeight, p2.lng, p2.lat, geo.nearHeight]),
+          perPositionHeight: true, material: coneColor.withAlpha(opacity * 0.25), outline: false,
+        }
+      }));
+    }
+  }
+
+  // Edge lines
+  for (const edgeAz of [startAz, endAz]) {
+    const pFar = offset(edgeAz, geo.farDist);
+    entities.push(viewer.entities.add({
+      polyline: { positions: Cesium.Cartesian3.fromDegreesArrayHeights([loc.lng, loc.lat, h, pFar.lng, pFar.lat, geo.farHeight]), width: 2, material: coneColor.withAlpha(opacity * 1.5) }
+    }));
+    entities.push(viewer.entities.add({
+      polyline: { positions: Cesium.Cartesian3.fromDegreesArrayHeights([pFar.lng, pFar.lat, geo.farHeight, pFar.lng, pFar.lat, 0]), width: 1, material: coneColor.withAlpha(opacity * 0.5) }
+    }));
+  }
+
+  // Center sight line
+  const cFar = offset(cam.pan, geo.farDist);
+  entities.push(viewer.entities.add({
+    polyline: {
+      positions: Cesium.Cartesian3.fromDegreesArrayHeights([loc.lng, loc.lat, h, cFar.lng, cFar.lat, geo.farHeight]),
+      width: 1, material: new Cesium.PolylineDashMaterialProperty({ color: coneColor.withAlpha(opacity * 2), dashLength: 12 }),
+    }
+  }));
+
+  // Far arc
+  const farArc = [];
+  for (let i = 0; i <= steps; i++) { const p = offset(startAz + (endAz - startAz) * (i / steps), geo.farDist); farArc.push(p.lng, p.lat, geo.farHeight); }
+  entities.push(viewer.entities.add({ polyline: { positions: Cesium.Cartesian3.fromDegreesArrayHeights(farArc), width: 2, material: coneColor.withAlpha(opacity * 1.2) } }));
+
+  // Near arc
+  if (geo.nearDist > 2) {
+    const nearArc = [];
+    for (let i = 0; i <= steps; i++) { const p = offset(startAz + (endAz - startAz) * (i / steps), geo.nearDist); nearArc.push(p.lng, p.lat, geo.nearHeight); }
+    entities.push(viewer.entities.add({ polyline: { positions: Cesium.Cartesian3.fromDegreesArrayHeights(nearArc), width: 1, material: coneColor.withAlpha(opacity * 0.8) } }));
+  }
+
+  coneEntities[cam.id] = entities;
+}
+
+function removeCone(camId) {
+  if (coneEntities[camId]) { for (const e of coneEntities[camId]) viewer.entities.remove(e); delete coneEntities[camId]; }
+}
+
+function buildAllCones() {
+  for (const [nid, cams] of Object.entries(CAMERAS)) for (const cam of cams) buildCone(nid, cam);
+}
+
+// ══════════════════════════════════════════
+// CAMERA PANEL UI
+// ══════════════════════════════════════════
+
+function renderControls() {
+  const container = document.getElementById('nodeControls');
+  container.innerHTML = '';
+  for (const [nodeId, loc] of Object.entries(LOCATIONS)) {
+    const cams = CAMERAS[nodeId];
+    const section = document.createElement('div');
+    section.className = 'node-section';
+
+    const header = document.createElement('div');
+    header.className = 'node-header open';
+    header.innerHTML = `<div class="dot" style="background:${loc.color}"></div>${loc.name}<span class="chevron">▶</span>`;
+    header.onclick = () => { header.classList.toggle('open'); camList.classList.toggle('open'); };
+    section.appendChild(header);
+
+    const camList = document.createElement('div');
+    camList.className = 'cam-list open';
+
+    for (let i = 0; i < cams.length; i++) {
+      const cam = cams[i];
+      const row = document.createElement('div');
+      row.className = 'cam-row';
+      row.innerHTML = `<input type="checkbox" class="cam-toggle" ${cam.visible ? 'checked' : ''} onchange="toggleCam('${nodeId}',${i},this.checked)">
+        <span style="cursor:pointer" onclick="selectCam('${cam.id}')">${cam.label} <span style="color:#666">(${cam.lens})</span></span>
+        <span class="remove-cam" onclick="removeCam('${nodeId}',${i})" title="Remove">✕</span>`;
+      camList.appendChild(row);
+
+      const edit = document.createElement('div');
+      edit.className = 'cam-edit'; edit.id = `edit-${cam.id}`;
+      const lensButtons = Object.keys(LENS_PRESETS).map(l =>
+        `<div class="lens-btn ${cam.lens===l?'active':''}" onclick="setLens('${nodeId}',${i},'${l}')">${l}</div>`).join('');
+      edit.innerHTML = `
+        <div class="slider-row"><span class="slider-label">Pan</span><input type="range" min="0" max="359" value="${cam.pan}" oninput="updateCam('${nodeId}',${i},'pan',+this.value)"><span class="slider-val" id="panVal-${cam.id}">${cam.pan}°</span></div>
+        <div class="slider-row"><span class="slider-label">Tilt</span><input type="range" min="0" max="85" value="${cam.tilt}" oninput="updateCam('${nodeId}',${i},'tilt',+this.value)"><span class="slider-val" id="tiltVal-${cam.id}">${cam.tilt}°</span></div>
+        <div class="slider-row"><span class="slider-label">FOV</span><input type="range" min="10" max="120" value="${cam.fov}" oninput="updateCam('${nodeId}',${i},'fov',+this.value)"><span class="slider-val" id="fovVal-${cam.id}">${cam.fov}°</span></div>
+        <div class="slider-row"><span class="slider-label">Range</span><input type="range" min="10" max="120" value="${cam.range}" oninput="updateCam('${nodeId}',${i},'range',+this.value)"><span class="slider-val" id="rangeVal-${cam.id}">${cam.range}m</span></div>
+        <div class="lens-row">${lensButtons}</div>`;
+      camList.appendChild(edit);
+    }
+
+    const addBtn = document.createElement('div');
+    addBtn.className = 'add-cam-btn'; addBtn.textContent = '+ Add camera';
+    addBtn.onclick = () => addCam(nodeId);
+    camList.appendChild(addBtn);
+    section.appendChild(camList);
+    container.appendChild(section);
+  }
+}
+
+function toggleCam(nodeId, idx, vis) { CAMERAS[nodeId][idx].visible = vis; buildCone(nodeId, CAMERAS[nodeId][idx]); }
+function selectCam(camId) {
+  document.querySelectorAll('.cam-edit.open').forEach(el => el.classList.remove('open'));
+  const el = document.getElementById(`edit-${camId}`); if (el) el.classList.toggle('open');
+}
+function updateCam(nodeId, idx, prop, val) {
+  const cam = CAMERAS[nodeId][idx]; cam[prop] = val;
+  const el = document.getElementById(`${prop}Val-${cam.id}`);
+  if (el) el.textContent = val + (prop === 'range' ? 'm' : '°');
+  buildCone(nodeId, cam);
+}
+function setLens(nodeId, idx, lens) {
+  const cam = CAMERAS[nodeId][idx]; cam.lens = lens; cam.fov = LENS_PRESETS[lens].fov;
+  buildCone(nodeId, cam);
+  const editEl = document.getElementById(`edit-${cam.id}`);
+  if (editEl) {
+    const fs = editEl.querySelectorAll('input[type="range"]')[2]; if (fs) fs.value = cam.fov;
+    const fv = document.getElementById(`fovVal-${cam.id}`); if (fv) fv.textContent = cam.fov + '°';
+    editEl.querySelectorAll('.lens-btn').forEach(b => b.classList.toggle('active', b.textContent === lens));
+  }
+}
+function removeCam(nodeId, idx) { removeCone(CAMERAS[nodeId][idx].id); CAMERAS[nodeId].splice(idx, 1); renderControls(); }
+function addCam(nodeId) {
+  const loc = LOCATIONS[nodeId]; const c = CAMERAS[nodeId].length + 1;
+  CAMERAS[nodeId].push({ id: `${nodeId.replace('node','n')}c${Date.now()}`, lens: "4mm", pan: 0, tilt: 25, fov: 87, range: globalRange, label: `C${c} New Camera`, color: loc.color, visible: true });
+  buildCone(nodeId, CAMERAS[nodeId][CAMERAS[nodeId].length - 1]); renderControls();
+}
+
+function setGlobalOpacity(val) {
+  globalOpacity = val / 100; document.getElementById('opVal').textContent = val + '%';
+  for (const [n, cs] of Object.entries(CAMERAS)) for (const c of cs) buildCone(n, c);
+}
+function setGlobalRange(val) {
+  globalRange = parseInt(val); document.getElementById('grVal').textContent = val + 'm';
+  for (const [n, cs] of Object.entries(CAMERAS)) for (const c of cs) { c.range = globalRange; buildCone(n, c); }
+  renderControls();
+}
+
+// ── FLY-TO ──
+function flyToOverview() {
+  viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(-73.985502, 40.758020, 134), orientation: { heading: Cesium.Math.toRadians(17), pitch: Cesium.Math.toRadians(-46.5), roll: 0 }, duration: 2 });
+}
+function flyToNode(nodeId) {
+  const l = LOCATIONS[nodeId];
+  viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(l.lng - 0.0003, l.lat - 0.0002, 80), orientation: { heading: Cesium.Math.toRadians(30), pitch: Cesium.Math.toRadians(-35), roll: 0 }, duration: 1.5 });
+}
+function flyToStreetLevel() {
+  viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(-73.9855, 40.7590, 8), orientation: { heading: Cesium.Math.toRadians(180), pitch: Cesium.Math.toRadians(-5), roll: 0 }, duration: 2 });
+}
+
+init();
+</script>
+</body>
+</html>
