@@ -118,9 +118,52 @@
     display: inline-block; background: #222; border: 1px solid #444; border-radius: 3px;
     padding: 0 4px; font-size: 9px; color: #ccc; font-family: inherit; min-width: 16px; text-align: center;
   }
+  /* ── AUTH GATE ── */
+  #authGate {
+    position: fixed; inset: 0; z-index: 9999; background: #050607;
+    display: flex; align-items: center; justify-content: center; flex-direction: column;
+  }
+  #authGate.hidden { display: none; }
+  body:has(#authGate:not(.hidden)) #panel,
+  body:has(#authGate:not(.hidden)) #rightPanel,
+  body:has(#authGate:not(.hidden)) #cesiumContainer { visibility: hidden; }
+  #authGate .logo { font-size: 28px; font-weight: 700; color: #FF3D14; margin-bottom: 6px; letter-spacing: -0.5px; }
+  #authGate .tagline { font-size: 12px; color: #666; margin-bottom: 32px; }
+  #authBox {
+    background: rgba(255,255,255,.04); border: 1px solid #333; border-radius: 12px;
+    padding: 28px 32px; width: 320px; text-align: center;
+  }
+  #authBox label { display: block; font-size: 11px; color: #888; margin-bottom: 8px; text-align: left; }
+  #authBox input[type="password"] {
+    width: 100%; padding: 10px 14px; background: #111; border: 1px solid #444;
+    border-radius: 6px; color: #fff; font-size: 14px; outline: none;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  #authBox input[type="password"]:focus { border-color: #FF3D14; }
+  #authBox button {
+    width: 100%; margin-top: 12px; padding: 10px; background: #FF3D14; border: none;
+    border-radius: 6px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  #authBox button:hover { background: #e63510; }
+  #authError { font-size: 11px; color: #ff4444; margin-top: 8px; min-height: 16px; }
 </style>
 </head>
 <body>
+
+<!-- AUTH GATE -->
+<div id="authGate">
+  <div class="logo">375edge</div>
+  <div class="tagline">Times Square Deployment Viewer</div>
+  <div id="authBox">
+    <label>Password</label>
+    <form onsubmit="return handleAuth(event)">
+      <input type="password" id="authInput" placeholder="Enter password" autofocus>
+      <button type="submit">Enter</button>
+    </form>
+    <div id="authError"></div>
+  </div>
+</div>
+
 <div id="cesiumContainer"></div>
 
 <!-- LEFT PANEL: camera controls -->
@@ -222,6 +265,44 @@
     </div>
   </div>
 </div>
+
+<script>
+// ── AUTH ──
+const HASH = '551ce99f632c55dbeabd296c6a641b3a08a85f337052d7790852f4f227f06562';
+let authenticated = false;
+
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function handleAuth(e) {
+  e.preventDefault();
+  const pw = document.getElementById('authInput').value;
+  const hash = await sha256(pw);
+  if (hash === HASH) {
+    authenticated = true;
+    document.getElementById('authGate').classList.add('hidden');
+    // Store session so refresh doesn't re-prompt
+    sessionStorage.setItem('375auth', 'ok');
+    init();
+  } else {
+    document.getElementById('authError').textContent = 'Incorrect password';
+    document.getElementById('authInput').value = '';
+    document.getElementById('authInput').focus();
+  }
+  return false;
+}
+
+// Auto-login if already authenticated in this tab
+if (sessionStorage.getItem('375auth') === 'ok') {
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('authGate').classList.add('hidden');
+    authenticated = true;
+    init();
+  });
+}
+</script>
 
 <script>
 // ── CONFIG ──
@@ -814,7 +895,7 @@ function flyToStreetLevel() {
   viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(-73.9855, 40.7590, 8), orientation: { heading: Cesium.Math.toRadians(180), pitch: Cesium.Math.toRadians(-5), roll: 0 }, duration: 2 });
 }
 
-init();
+// init() is called by auth gate after password is verified
 </script>
 </body>
 </html>
